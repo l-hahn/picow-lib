@@ -2,7 +2,8 @@ import rp2
 import network
 import ubinascii
 import time
-import socket
+import usocket
+import json
 
 import sys
 
@@ -20,6 +21,7 @@ def get_logger():
 
 
 class Request:
+    @staticmethod
     def parse_header(request):
         http_lines = request.decode().split('\r\n')
         http_request_split = http_lines[0].split(' ')
@@ -30,65 +32,105 @@ class Request:
         )    
 
         if len(http_request_path_split) > 1:
-            http_request.set_parameter(dict(
+            http_request.parameter = dict(
                 param.split('=')
                 for param in http_request_path_split[1].split('&')
-            ))
+            )
         if len(http_lines) > 1:
-            http_request.set_header(dict(
+            http_request.header = dict(
                 header.split(': ')
                 for header in http_lines[1:]
                 if header is not None and header != ""
-            ))
+            )
         return http_request
 
     def __init__(
             self, method, path, protocol,
             host="", header={}, content=None, parameter={}):
-        self.method = method
-        self.host = host
-        self.path = path
-        self.parameter = parameter
-        self.protocol = protocol
-        self.header = header
-        self.content = content
-
+        self._method = method
+        self._host = host
+        self._path = path
+        self._parameter = parameter
+        self._protocol = protocol
+        self._header = header
+        self._content = content
     def __repr__(self):
         return repr({
-            "method": self.method,
-            "host": self.host,
-            "path": self.path,
-            "parameter": self.parameter,
-            "protocol": self.protocol,
-            "header": self.header,
-            "content": self.content
+            "method": self._method,
+            "host": self._host,
+            "path": self._path,
+            "parameter": self._parameter,
+            "protocol": self._protocol,
+            "header": self._header,
+            "content": self._content
         })
     def __str__(self):
-        return self.get_request().decode()
+        return self.request_bytes.decode()
 
-    def set_header(self, header):
-        if self.header is None or len(self.header) == 0:
-            self.header = header
-    def set_content(self, content):
-        if self.content is None or len(self.content) == 0:
-            self.content = content
-    def set_host(self, host):
-        if self.host is None or len(self.host) == 0:
-            self.host = host
-    def set_parameter(self, parameter):
-        if self.parameter is None or len(self.parameter) == 0:
+    @property
+    def method(self):
+        return self._method
+    @method.setter
+    def method(self, method):
+        if self._method is None or len(self._method) == 0:
+            self._method = method
+    @property
+    def host(self):
+        return self._host
+    @host.setter
+    def host(self, host):
+        if self._host is None or len(self._host) == 0:
+            self._host = host
+    @property
+    def path(self):
+        return self._path
+    @path.setter
+    def path(self, path):
+        if self._path is None or len(self._path) == 0:
+            self._path = path
+    @property
+    def parameter(self):
+        return self._parameter
+    @parameter.setter
+    def parameter(self, parameter):
+        if self._parameter is None or len(self._parameter) == 0:
             self.paramter = parameter
-
-    def get_request(self):
-        request = bytearray(self.get_header_request())
-        request.extend(b"" if self.content is None else f"{self.content}".encode())
+    @property
+    def protocol(self):
+        return self._protocol
+    @protocol.setter
+    def protocol(self, protocol):
+        if self._protocol is None or len(self._protocol) == 0:
+            self._protocol = protocol
+    @property
+    def header(self):
+        return self._header
+    @header.setter
+    def header(self, header):
+        if self._header is None or len(self._header) == 0:
+            self._header = header
+    @property
+    def content(self):
+        return self._content
+    @content.setter
+    def content(self, content):
+        if self._content is None or len(self._content) == 0:
+            self._content = content
+            self._header['Content-Length'] = str(len(content))
+    @property
+    def request_bytes(self):
+        request = bytearray(self._header_request_bytes)
+        request.extend(b"" if self._content is None else f"{self._content}".encode())
         return request
-    def get_header_request(self):
-        headers = "\r\n".join(': '.join(header) for header in self.header.items())
-        strpath = self.path
-        if len(self.parameter) > 0:
-            strpath += f"?{'&'.join('='.join(item) for item in self.parameter.items())}"
-        return f"{self.method} {strpath} {self.protocol}\r\n{headers}\r\n\r\n".encode()
+    @property
+    def _header_request_bytes(self):
+        headers = "\r\n".join(': '.join(header) for header in self._header.items())
+        strpath = self._path
+        if len(self._parameter) > 0:
+            strpath += f"?{'&'.join('='.join(item) for item in self._parameter.items())}"
+        if len(self._header) == 0:
+            return f"{self._method} {strpath} {self._protocol}\r\n\r\n".encode()
+        return f"{self._method} {strpath} {self._protocol}\r\n{headers}\r\n\r\n".encode()
 
 class Response(Request):
     messages = {
@@ -100,33 +142,37 @@ class Response(Request):
     def __init__(self, method, path, protocol, status,
             host="", header={}, content=None, parameter={}):
         super().__init__(method, path, protocol, host, header, content, parameter)
-        self.status = status
+        self._status = str(status)
 
     def __repr__(self):
         return repr({
-            "method": self.method,
-            "host": self.host,
-            "path": self.path,
-            "parameter": self.parameter,
-            "protocol": self.protocol,
-            "status": self.status,
-            "message": Response.messages[self.status],
-            "header": self.header,
-            "content": self.content
+            "method": self._method,
+            "host": self._host,
+            "path": self._path,
+            "parameter": self._parameter,
+            "protocol": self._protocol,
+            "status": self._status,
+            "message": Response.messages[self._status],
+            "header": self._header,
+            "content": self._content
         })
     def __str__(self):
-        return self.get_response().decode()
-
-    def get_response(self):
-        response = bytearray(self.get_header_response())
-        response.extend(b"" if self.content is None else f"{self.content}".encode())
+        return self.response_bytes.decode()
+    @property
+    def status(self):
+        return self._status
+    @property
+    def response_bytes(self):
+        response = bytearray(self._header_response_bytes)
+        response.extend(b"" if self._content is None else f"{self._content}".encode())
         return response
-    def get_header_response(self):
-        headers = "\r\n".join(': '.join(header) for header in self.header.items())
-        strpath = self.path
-        if len(self.parameter) > 0:
-            strpath += f"?{'&'.join('='.join(item) for item in self.parameter.items())}"
-        return f"{self.protocol} {self.status} {Response.messages[self.status]}\r\n{headers}\r\n\r\n".encode()
+    @property
+    def _header_response_bytes(self):
+        headers = "\r\n".join(': '.join(header) for header in self._header.items())
+        strpath = self._path
+        if len(self._parameter) > 0:
+            strpath += f"?{'&'.join('='.join(item) for item in self._parameter.items())}"
+        return f"{self._protocol} {self._status} {Response.messages[self._status]}\r\n{headers}\r\n\r\n".encode()
 
 class MicroWebServer:
     BUFFER_SIZE = 1024
@@ -139,7 +185,6 @@ class MicroWebServer:
             webrequest.extend(connect.recv(MicroWebServer.BUFFER_SIZE))
             is_end_stream = webrequest.endswith(b'\r\n\r\n') or len(webrequest) >= size
         return webrequest
-
     @staticmethod
     def socket_receive(connect):
         request_header_bytes = MicroWebServer.buffer_receive(connect)
@@ -149,24 +194,42 @@ class MicroWebServer:
                 connect, size=int(request.header['Content-Length'])
             )
             content = request_content_bytes.decode()
-            request.set_content(content)
+            request.content = content
         return request
-
+    @staticmethod
+    def default_locator():
+        return Response(None, None, "HTTP/1.0", 404)
 
     def __init__(self, listen_addr="0.0.0.0", port=80):
         self._listen_addr = listen_addr
         self._port = port
+        self._locations = {}
+    
+    def location(self, path):
+        def decorator(functor):
+            self._locations[path] = functor
+            return functor
+        return decorator
+
+    @property
+    def listen_addr(self):
+        return self._listen_addr
+    @property
+    def port(self):
+        return self._port
 
     def _create_socket(self):
-        self._socket_addrinfo = socket.getaddrinfo(self._listen_addr, self._port)
-        self._socket = socket.socket()
+        self._socket_addrinfo = usocket.getaddrinfo(self._listen_addr, self._port)
+        self._socket = usocket.socket()
         self._socket.bind(self._socket_addrinfo[0][-1])
         self._socket.listen(1)
 
     def _handle_request(self, request):
         logger.debug(f"Request: \n{request}")
-        response = Response(request.method, request.path, request.protocol, "200")
-        return response
+        if request.path in self._locations.keys():
+            return self._locations[request.path]()
+        else:
+            return MicroWebServer.default_locator()
 
     def serve(self):
         self._create_socket()
@@ -178,7 +241,7 @@ class MicroWebServer:
                 logger.debug(f"Client connect from '{addr[0]}'")
                 request = MicroWebServer.socket_receive(conn)
                 response = self._handle_request(request)
-                conn.send(response.get_response())
+                conn.send(response.response_bytes)
                 conn.close()
             except OSError as e:
                 conn.close()
@@ -215,6 +278,8 @@ def connect_wlan(ssid, passphrase, hostname="PicoW", country="DE", power_save=Fa
         print(f"\rConnection to '{ssid}' established. Connected via address '{ip}' from '{wlan_mac_address}'.")
     return wlan
 
+
+
 def main():
     ssid = "SSID"
     pw = "PASSWORD"
@@ -222,8 +287,26 @@ def main():
     get_logger()
 
     webserver = MicroWebServer()
+
+    @webserver.location(path="/")
+    def test_handler():
+        return Response("GET", "/", "HTTP/1.0", 204)
+
+    @webserver.location(path="/my/path")
+    def test_handler_content():
+        body = {
+            "Hello":"World"
+        }
+        resp = Response("GET", "/", "HTTP/1.0", 200)
+        # TODO: add some nicer handling with headers and content...
+        resp.header = {
+             "Content-Type": "application/json"   
+        }
+        resp.content = json.dumps(body)
+        print(resp.header)
+        return resp
+
     webserver.serve()
 
 if __name__=='__main__':
     main()
-
